@@ -3,9 +3,9 @@
 # Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
 # email: guyserbin <at> eoanalytics <dot> ie
 
-# version 1.2
+# version 2.0
 
-# This script will create and update a shapefile of all available Landsat TM/ETM+/OLI-TIRS scenes, including available metadata
+# This script will create and update a shapefile of all available Level-2 Sentinel 5p scenes that intersect the area of interest, including available metadata
 # Changes:
 # 23 May 2018: XML functionality deprecated in favor of JSON queries, as the former is no longer available or efficient
 # 25 March 2019: This script will now read configuration data from ieo.ini
@@ -44,51 +44,59 @@ config = ieo.config
 # config_location = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'updateshp.ini')
 
 # config.read(config_location) # config_path
-pathrowvals = config['landsat']['pathrowvals'] # this is a comma-delimited string containing multiples of four values: start path, end path, start row, end row. It is designed to query rectangular path/row combinations, in order to avoid scenes that don't touch landmasses or are not of interest.
-useWRS2 = config['landsat']['useWRS2'] # Setting this parameter to "Yes" in updateshp.ini will query WRS-2 Path/ Row field values from ieo.WRS2, and may result in a great increase in the number of queries to USGS servers
+pathrowvals = config['Sentinel5p']['pathrowvals'] # this is a comma-delimited string containing multiples of four values: start path, end path, start row, end row. It is designed to query rectangular path/row combinations, in order to avoid scenes that don't touch landmasses or are not of interest.
+# useWRS2 = config['Sentinel5p']['useWRS2'] # Setting this parameter to "Yes" in updateshp.ini will query WRS-2 Path/ Row field values from ieo.WRS2, and may result in a great increase in the number of queries to USGS servers
 
-parser = argparse.ArgumentParser('This script imports LEDAPS-processed scenes into the local library. It stacks images and converts them to the locally defined projection in IEO, and adds ENVI metadata.')
+parser = argparse.ArgumentParser('This script imports Sentinel 5p Level-2 scene metadata into the local library.')
 #parser.add_argument('-x','--xml', type = bool, default = False, help = 'Use downloaded XML files from USGS.')
 #parser.add_argument('-j','--json', type = bool, default = True, help = 'Use JSON query (Default = True).')
-parser.add_argument('-u','--username', type = str, default = None, help = 'USGS/EROS Registration System (ERS) username.')
-parser.add_argument('-p', '--password', type = str, default = None, help = 'USGS/EROS Registration System (ERS) password.')
-parser.add_argument('-c', '--catalogID', type = str, default = 'EE', help = 'USGS/EROS Catalog ID (default = "EE").')
-parser.add_argument('-v', '--version', type = str, default = "1.4.0", help = 'JSON version, default = 1.4.0.')
-parser.add_argument('--startdate', type = str, default = "1982-01-01", help = 'Start date for query in YYYY-MM-DD format. (Default = 1982-01-01).')
-parser.add_argument('--enddate', type = str, default = None, help = "End date for query in YYYY-MM-DD format. (Default = today's date).")
-parser.add_argument('-m', '--MBR', type = str, default = None, help = 'Minimum Bounding Rectangle (MBR) coordinates in decimal degrees in the following format (comma delimited, no spaces): lower left latitude, lower left longitude, upper right latitude, upper right longitude. If not supplied, these will be determined from WRS-2 Paths and Rows in updateshp.ini.')
-parser.add_argument('-b', '--baseURL', type = str, default = 'https://earthexplorer.usgs.gov/inventory/json/v/', help = 'Base URL to use excluding JSON version (Default = "https://earthexplorer.usgs.gov/inventory/json/v/").')
-parser.add_argument('--maxResults', type = int, default = 50000, help = 'Maximum number of results to return (1 - 50000, default = 50000).')
+parser.add_argument('-u','--username', type = str, default = config['Sentinel5p']['username'], help = 'S5phub username.')
+parser.add_argument('-p', '--password', type = str, default = config['Sentinel5p']['password'], help = 'S5phub password.')
+# parser.add_argument('-c', '--catalogID', type = str, default = 'EE', help = 'USGS/EROS Catalog ID (default = "EE").')
+# parser.add_argument('-v', '--version', type = str, default = "1.4.0", help = 'JSON version, default = 1.4.0.')
+parser.add_argument('--startdate', type = str, default = "2018-06-28T00:00:00.000Z", help = 'Start date and time string for query in UTC (YYYY-MM-DDTHH:MM:SS.SSSZ) format. (Default = 2018-06-28T00:00:00.000Z).')
+parser.add_argument('--enddate', type = str, default = None, help = "End date and time string for query in UTC format. (Default = current UTC date and time).")
+parser.add_argument('-m', '--MBR', type = str, default = config['Sentinel5p']['footprint'], help = 'Minimum Bounding Rectangle (MBR) coordinates in decimal degrees in the following format: "ULX ULY,URX URY,LRX LRY, LLX LLY, ULX ULY". If not supplied, these will be determined from IEO configureation defaults.')
+parser.add_argument('-b', '--baseURL', type = str, default = 'https://s5phub.copernicus.eu/dhus/search?q=', help = 'Base URL to use excluding JSON version (Default = "https://earthexplorer.usgs.gov/inventory/json/v/").')
+# parser.add_argument('--maxResults', type = int, default = 50000, help = 'Maximum number of results to return (1 - 50000, default = 50000).')
 parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite existing files.')
 parser.add_argument('--thumbnails', type = bool, default = True, help = 'Download thumbnails (default = True).')
+parser.add_argument('--loclatlonshp', type = str, default = config['VECTOR']['latlon'], help = 'Shapefile of area of interest in Lat/Lon, EPSG:4326. Default value should be in IEO configuration.')
+parser.add_argument('--locshp', type = str, default = config['VECTOR']['locshp'], help = 'Shapefile of area of interest in default local projection. Default value should be in IEO configuration.)
+parser.add_argument('--S5platlon', type = str, default = config['VECTOR']['S5platlon'], help = 'Shapefile of available S5p scenes in Lat/Lon, EPSG:4326. Default value should be in IEO configuration.)
+parser.add_argument('--S5plocal', type = str, default = config['VECTOR']['S5plocal'], help = 'Shapefile of available S5p scenes in default local projection. Default value should be in IEO configuration.)
+
 args = parser.parse_args()
 
 if not (args.username and args.password):
     if not args.username:
-        args.username = input('USGS/ERS username: ')
+        args.username = input('S5phub username: ')
     if not args.password:
-        args.password = getpass.getpass('USGS/ERS password: ')
+        args.password = getpass.getpass('S5phub password: ')
 
 #pathrows = []
 subpathrow = []
 #xmls = []
 
 #xmls = ['metadata21.xml', 'metadata22_24.xml']
-ingestdir = os.path.join(ieo.ingestdir, 'Metadata')
-dirname = os.path.join(ieo.catdir, 'Landsat')
+metadatadir = os.path.join(ieo.ingestdir, 'S5p', 'Metadata')
+dirname = os.path.join(ieo.catdir, 'Sentinel5p')
 logdir = ieo.logdir
-jpgdir = os.path.join(ieo.catdir, 'Landsat', 'Thumbnails')
+jpgdir = os.path.join(dirname, 'Thumbnails')
 itmdir = ieo.srdir
-shapefile = ieo.landsatshp
+shapefile = args.S5platlon
 layername = os.path.basename(shapefile)[:-4] # assumes a shapefile ending in '.shp'
-addfields = ['MaskType', 'Thumb_JPG', 'SR_path', 'BT', 'Fmask', 'Pixel_QA', 'NDVI', 'EVI']
+addfields = ['Archive']
 errorlist = []
 scenelist = []
 if not args.enddate:
-    today = datetime.datetime.today()
-    args.enddate = today.strftime('%Y-%m-%d')
+    today = datetime.datetime.utcnow()
+    args.enddate = today.strftime('%Y-%m-%dT23:59:59.999Z')
 
-errorfile = os.path.join(logdir, 'Landsat_inventory_download_errors.csv')
+prodlist = sorted(['CH4', 'NO2', 'CLOUD', 'CO', 'HCHO', 'AER_AI', 'NP_BD3', 'NP_BD6', 'NP_BD7', 'O3_TCL', 'O3__', 'SO2'])
+
+
+errorfile = os.path.join(logdir, 'Sentinel5p_inventory_download_errors.csv')
 errorsfound = False
 
 #localxmls = False # New code as the old XML download string doesn't include newer landsat data or the new product IDs.
@@ -97,43 +105,43 @@ errorsfound = False
 #    localxmls = True
 #    xmls = glob.glob(os.path.join(ingestdir, '*.xml'))
 
-pathrowstrs = [] # list of strings containing WRS-2 Path/ Row combinations
-paths = [] # list containing WRS-2 Paths
-rows = [] # List containing WRS-2 Rows
-
-if useWRS2.lower() == 'yes':
+# pathrowstrs = [] # list of strings containing WRS-2 Path/ Row combinations
+# paths = [] # list containing WRS-2 Paths
+# rows = [] # List containing WRS-2 Rows
+#
+# if useWRS2.lower() == 'yes':
 #   gdb, wrs = os.path.split(ieo.WRS2)
-    print('Getting WRS-2 Path/Row combinations from shapefile: {}'.format(ieo.WRS2))
-    driver = ogr.GetDriverByName("ESRI Shapefile")
-    print('WRS-2 = {}'.format(ieo.WRS2))
-    ds = driver.Open(ieo.WRS2, 0)
-    layer = ds.GetLayer()
-    for feature in layer:
-        path = feature.GetField('PATH')
-        if not path in paths:
-            paths.append(path)
-        row = feature.GetField('ROW')
-        if not row in rows:
-            rows.append(row)
-        pathrowstrs.append('{:03d}{:03d}'.format(path, row))
-#            pathrows.append([path, path, row, row])
-    ds = None
-else:
-    print('Using WRS-2 Path/Row combinations from INI file.')
-    pathrowvals = pathrowvals.split(',')
-#    print(pathrowvals)
-    iterations = int(len(pathrowvals) / 4)
-#    print('Iterations = {}'.format(iterations))
-    for i in range(iterations):
-        for j in range(int(pathrowvals[i * 4]), int(pathrowvals[i * 4 + 1]) + 1):
-#            print('j = {}'.format(j))
-            if not j in paths:
-                paths.append(j)
-            for k in range(int(pathrowvals[i * 4 + 2]), int(pathrowvals[i * 4 + 3]) + 1):
-#                print('k = {}'.format(k))
-                pathrowstrs.append('{:03d}{:03d}'.format(j, k))
-                if not k in rows:
-                    rows.append(k)
+#     print('Getting WRS-2 Path/Row combinations from shapefile: {}'.format(ieo.WRS2))
+#     driver = ogr.GetDriverByName("ESRI Shapefile")
+#     print('WRS-2 = {}'.format(ieo.WRS2))
+#     ds = driver.Open(ieo.WRS2, 0)
+#     layer = ds.GetLayer()
+#     for feature in layer:
+#         path = feature.GetField('PATH')
+#         if not path in paths:
+#             paths.append(path)
+#         row = feature.GetField('ROW')
+#         if not row in rows:
+#             rows.append(row)
+#         pathrowstrs.append('{:03d}{:03d}'.format(path, row))
+# #            pathrows.append([path, path, row, row])
+#     ds = None
+# else:
+#     print('Using WRS-2 Path/Row combinations from INI file.')
+#     pathrowvals = pathrowvals.split(',')
+# #    print(pathrowvals)
+#     iterations = int(len(pathrowvals) / 4)
+# #    print('Iterations = {}'.format(iterations))
+#     for i in range(iterations):
+#         for j in range(int(pathrowvals[i * 4]), int(pathrowvals[i * 4 + 1]) + 1):
+# #            print('j = {}'.format(j))
+#             if not j in paths:
+#                 paths.append(j)
+#             for k in range(int(pathrowvals[i * 4 + 2]), int(pathrowvals[i * 4 + 3]) + 1):
+# #                print('k = {}'.format(k))
+#                 pathrowstrs.append('{:03d}{:03d}'.format(j, k))
+#                 if not k in rows:
+#                     rows.append(k)
 
 #print('Paths')
 #print(paths)
@@ -171,212 +179,214 @@ else:
 #            sys.exit()
 
 ## JSON functions
+#
+# def getapiKey():
+#     # This function gets the apiKey used for all queries to the USGS/EROS servers
+#     URL = '{}{}/login'.format(args.baseURL, args.version)
+#     print('Logging in to: {}'.format(URL))
+#     data = json.dumps({'username': args.username, 'password': args.password, 'catalog_ID': args.catalogID})
+#     response = requests.post(URL, data = {'jsonRequest':data}) #
+#     json_data = json.loads(response.text)
+#     apiKey = json_data['data']
+#     return apiKey
 
-def getapiKey():
-    # This function gets the apiKey used for all queries to the USGS/EROS servers
-    URL = '{}{}/login'.format(args.baseURL, args.version)
-    print('Logging in to: {}'.format(URL))
-    data = json.dumps({'username': args.username, 'password': args.password, 'catalog_ID': args.catalogID})
-    response = requests.post(URL, data = {'jsonRequest':data}) #
-    json_data = json.loads(response.text)
-    apiKey = json_data['data']
-    return apiKey
+# def getMBR():
+#     # This creates the Minimum Bounding Rectangle (MBR) for JSON queries
+#     URL = '{}{}/grid2ll'.format(args.baseURL, args.version)
+#     prs = [[min(paths), min(rows)], [min(paths), max(rows)], [max(paths), max(rows)], [max(paths), min(rows)]]
+#     Xcoords = []
+#     Ycoords = []
+#     for pr in prs:
+#         print('Requesting coordinates for WRS-2 Path {} Row {}.'.format(pr[0], pr[1]))
+#         jsonRequest = json.dumps({"gridType" : "WRS2", "responseShape" : "point", "path" : str(pr[0]), "row" : str(pr[1])}).replace(' ','')
+#         requestURL = '{}?jsonRequest={}'.format(URL, jsonRequest)
+#         response = requests.post(requestURL) # URL, data = {'jsonRequest': jsonRequest}
+#         json_data = json.loads(response.text)
+#         Xcoords.append(float(json_data["data"]["coordinates"][0]["longitude"]))
+#         Ycoords.append(float(json_data["data"]["coordinates"][0]["latitude"]))
+#     return [min(Ycoords), min(Xcoords), max(Ycoords), max(Xcoords)]
 
-def getMBR():
-    # This creates the Minimum Bounding Rectangle (MBR) for JSON queries
-    URL = '{}{}/grid2ll'.format(args.baseURL, args.version)
-    prs = [[min(paths), min(rows)], [min(paths), max(rows)], [max(paths), max(rows)], [max(paths), min(rows)]]
-    Xcoords = []
-    Ycoords = []
-    for pr in prs:
-        print('Requesting coordinates for WRS-2 Path {} Row {}.'.format(pr[0], pr[1]))
-        jsonRequest = json.dumps({"gridType" : "WRS2", "responseShape" : "point", "path" : str(pr[0]), "row" : str(pr[1])}).replace(' ','')
-        requestURL = '{}?jsonRequest={}'.format(URL, jsonRequest)
-        response = requests.post(requestURL) # URL, data = {'jsonRequest': jsonRequest}
-        json_data = json.loads(response.text)
-        Xcoords.append(float(json_data["data"]["coordinates"][0]["longitude"]))
-        Ycoords.append(float(json_data["data"]["coordinates"][0]["latitude"]))
-    return [min(Ycoords), min(Xcoords), max(Ycoords), max(Xcoords)]
+# def scenesearch(apiKey, scenelist):
+#     # This searches the USGS archive for scene metadata, and checks it against local metadata. New scenes will be queried for metadata.
+#     RequestURL = '{}{}/search'.format(args.baseURL, args.version)
+#     QueryURL = '{}{}/metadata'.format(args.baseURL, args.version)
+#     datasetNames = ['LANDSAT_8_C1', 'LANDSAT_ETM_C1', 'LANDSAT_TM_C1']
+#     scenedict = {}
+#     js = {'LL': 0, 'UL': 1, 'UR': 2, 'LR': 3}
+#     for datasetName in datasetNames:
+#         print('Querying collection: {}'.format(datasetName))
+#         searchparams = json.dumps({"apiKey": apiKey,
+#                         "datasetName": datasetName,
+#                         "spatialFilter":{"filterType": "mbr",
+#                                          "lowerLeft":{"latitude": args.MBR[0],
+#                                                       "longitude": args.MBR[1]},
+#                                          "upperRight":{"latitude": args.MBR[2],
+#                                                        "longitude": args.MBR[3]}},
+#                         "temporalFilter":{"startDate": args.startdate,
+#                                           "endDate": args.enddate},
+#                         "includeUnknownCloudCover":False,
+#                         "maxCloudCover": 100,
+#                         "maxResults": args.maxResults,
+#                         "sortOrder": "ASC"})
+#         response = requests.post(RequestURL, data = {'jsonRequest': searchparams})
+#         json_data = json.loads(response.text)
+#         querylist = []
+#         for i in range(len(json_data['data']['results'])):
+#             sceneID = json_data['data']['results'][i]['entityId']
+#             if sceneID[3:9] in pathrowstrs and not sceneID in scenelist:
+#                 querylist.append(sceneID)
+#                 scenedict[sceneID] = {'Landsat Product Identifier': json_data['data']['results'][i]["displayId"],
+#                          "browseUrl": json_data['data']['results'][i]["browseUrl"],
+#                          "dataAccessUrl": json_data['data']['results'][i]["dataAccessUrl"],
+#                          "downloadUrl": json_data['data']['results'][i]["downloadUrl"],
+#                          "metadataUrl": json_data['data']['results'][i]["metadataUrl"],
+#                          "fgdcMetadataUrl": json_data['data']['results'][i]["fgdcMetadataUrl"],
+#                          'modifiedDate': json_data['data']['results'][i]["modifiedDate"],
+#                          "orderUrl": json_data['data']['results'][i]["orderUrl"],
+#                          'coords': [[0.0, 0.0]] * 5,
+#                          'Dataset Identifier': datasetName}
+#
+#         if len(querylist) > 0:
+#             print('{} new scenes have been found, querying metadata.'.format(len(querylist)))
+#             iterations = math.ceil(len(querylist) / 100) # break up queries into blocks of 100 or less scenes
+#             total = 0
+#             #iterations = 1 # temporary limitation
+#             for iteration in range(iterations):
+#                 startval = iteration * 100
+#                 if iteration * 100 > len(querylist):
+#                     endval = len(querylist) - startval - 1
+#                 else:
+#                     endval = startval + 99
+#                 total += endval + 1
+#                 print('Now querying {} scenes, query {}/{}.'.format((endval - startval + 1), iteration + 1, iterations))
+#                 querystr = ''
+#
+#                 for sceneID in querylist[startval: endval]:
+#                     querystr += ',{}'.format(sceneID)
+#                 querystr = querystr[1:]
+#                 queryparams = json.dumps({"apiKey":apiKey,
+#                             "datasetName":datasetName,
+#                             'entityIds': querystr})
+#                 query = requests.post(QueryURL, data = {'jsonRequest':queryparams})
+# #                if endval == 99:
+# #                    outfile = r'd:\data\ieo\firstquery.txt'
+# #                    with open(outfile, 'w') as output:
+# #                        output.write(query.text)
+#                 querydict = json.loads(query.text)
+#                 if len(querydict['data']) > 0:
+#                     for item in querydict['data']:
+#                         if len(item['metadataFields']) > 0:
+#                             for subitem in item['metadataFields']:
+#                                 fieldname = subitem['fieldName'].rstrip().lstrip().replace('L-1', 'L1')
+#                                 if fieldname == 'Landsat Scene Identifier':
+#                                     sceneID = subitem['value']
+#                                 elif fieldname in queryfieldnames and not fieldname in scenedict[sceneID].keys():
+#                                     value = subitem['value']
+#                                     if value:
+#                                         i = queryfieldnames.index(fieldname)
+#                                         if fieldvaluelist[i][3] == ogr.OFTDate or fieldname.endswith('Date'):
+#                                             if 'Time' in fieldname:
+#                                                 value = datetime.datetime.strptime(value[:-1], '%Y:%j:%H:%M:%S.%f')
+#                                             elif '/' in value:
+#                                                 value = datetime.datetime.strptime(value, '%Y/%m/%d')
+#                                             else:
+#                                                 value = datetime.datetime.strptime(value, '%Y-%m-%d')
+#                                         elif fieldvaluelist[i][3] == ogr.OFTReal:
+#                                             value = float(value)
+#                                         elif fieldvaluelist[i][3] == ogr.OFTInteger:
+#                                             try:
+#                                                 value = int(value)
+#                                             except:
+#                                                 print('Error: fieldname {} has a value of {}.'.format(fieldname, value))
+#                                                 sys.exit()
+#                                         elif fieldname == 'browseUrl':
+#                                             if value:
+#                                                 if value.lower() != 'null':
+#                                                     scenedict[sceneID]['browse'] = 'Y'
+#                                                 else:
+#                                                     scenedict[sceneID]['browse'] = 'N'
+#                                         elif fieldname == 'Data Type Level-1':
+#                                             j = value.rfind('_') + 1
+#                                             value = value[j:]
+#                                         scenedict[sceneID][fieldname] = value
+#                                 elif fieldname in polycoords:
+#                                     if 'Long' in fieldname:
+#                                         k = 1
+#                                     else:
+#                                         k = 0
+#                                     if fieldname.startswith('LL'): # Scene polygons start and end on lower left corner
+#                                         for l in [0, 4]:
+#                                             scenedict[sceneID]['coords'][js[fieldname[:2]] + l][k] = float(value)
+#                                     else:
+#                                         scenedict[sceneID]['coords'][js[fieldname[:2]]][k] = float(value)
+#
+#                     if not 'Spacecraft Identifier' in scenedict[sceneID].keys():
+#                         scenedict[sceneID]['Spacecraft Identifier'] = 'LANDSAT_{}'.format(sceneID[2:3])
+#     return scenedict
 
-def scenesearch(apiKey, scenelist):
-    # This searches the USGS archive for scene metadata, and checks it against local metadata. New scenes will be queried for metadata.
-    RequestURL = '{}{}/search'.format(args.baseURL, args.version)
-    QueryURL = '{}{}/metadata'.format(args.baseURL, args.version)
-    datasetNames = ['LANDSAT_8_C1', 'LANDSAT_ETM_C1', 'LANDSAT_TM_C1']
-    scenedict = {}
-    js = {'LL': 0, 'UL': 1, 'UR': 2, 'LR': 3}
-    for datasetName in datasetNames:
-        print('Querying collection: {}'.format(datasetName))
-        searchparams = json.dumps({"apiKey": apiKey,
-                        "datasetName": datasetName,
-                        "spatialFilter":{"filterType": "mbr",
-                                         "lowerLeft":{"latitude": args.MBR[0],
-                                                      "longitude": args.MBR[1]},
-                                         "upperRight":{"latitude": args.MBR[2],
-                                                       "longitude": args.MBR[3]}},
-                        "temporalFilter":{"startDate": args.startdate,
-                                          "endDate": args.enddate},
-                        "includeUnknownCloudCover":False,
-                        "maxCloudCover": 100,
-                        "maxResults": args.maxResults,
-                        "sortOrder": "ASC"})
-        response = requests.post(RequestURL, data = {'jsonRequest': searchparams})
-        json_data = json.loads(response.text)
-        querylist = []
-        for i in range(len(json_data['data']['results'])):
-            sceneID = json_data['data']['results'][i]['entityId']
-            if sceneID[3:9] in pathrowstrs and not sceneID in scenelist:
-                querylist.append(sceneID)
-                scenedict[sceneID] = {'Landsat Product Identifier': json_data['data']['results'][i]["displayId"],
-                         "browseUrl": json_data['data']['results'][i]["browseUrl"],
-                         "dataAccessUrl": json_data['data']['results'][i]["dataAccessUrl"],
-                         "downloadUrl": json_data['data']['results'][i]["downloadUrl"],
-                         "metadataUrl": json_data['data']['results'][i]["metadataUrl"],
-                         "fgdcMetadataUrl": json_data['data']['results'][i]["fgdcMetadataUrl"],
-                         'modifiedDate': json_data['data']['results'][i]["modifiedDate"],
-                         "orderUrl": json_data['data']['results'][i]["orderUrl"],
-                         'coords': [[0.0, 0.0]] * 5,
-                         'Dataset Identifier': datasetName}
-
-        if len(querylist) > 0:
-            print('{} new scenes have been found, querying metadata.'.format(len(querylist)))
-            iterations = math.ceil(len(querylist) / 100) # break up queries into blocks of 100 or less scenes
-            total = 0
-            #iterations = 1 # temporary limitation
-            for iteration in range(iterations):
-                startval = iteration * 100
-                if iteration * 100 > len(querylist):
-                    endval = len(querylist) - startval - 1
-                else:
-                    endval = startval + 99
-                total += endval + 1
-                print('Now querying {} scenes, query {}/{}.'.format((endval - startval + 1), iteration + 1, iterations))
-                querystr = ''
-
-                for sceneID in querylist[startval: endval]:
-                    querystr += ',{}'.format(sceneID)
-                querystr = querystr[1:]
-                queryparams = json.dumps({"apiKey":apiKey,
-                            "datasetName":datasetName,
-                            'entityIds': querystr})
-                query = requests.post(QueryURL, data = {'jsonRequest':queryparams})
-#                if endval == 99:
-#                    outfile = r'd:\data\ieo\firstquery.txt'
-#                    with open(outfile, 'w') as output:
-#                        output.write(query.text)
-                querydict = json.loads(query.text)
-                if len(querydict['data']) > 0:
-                    for item in querydict['data']:
-                        if len(item['metadataFields']) > 0:
-                            for subitem in item['metadataFields']:
-                                fieldname = subitem['fieldName'].rstrip().lstrip().replace('L-1', 'L1')
-                                if fieldname == 'Landsat Scene Identifier':
-                                    sceneID = subitem['value']
-                                elif fieldname in queryfieldnames and not fieldname in scenedict[sceneID].keys():
-                                    value = subitem['value']
-                                    if value:
-                                        i = queryfieldnames.index(fieldname)
-                                        if fieldvaluelist[i][3] == ogr.OFTDate or fieldname.endswith('Date'):
-                                            if 'Time' in fieldname:
-                                                value = datetime.datetime.strptime(value[:-1], '%Y:%j:%H:%M:%S.%f')
-                                            elif '/' in value:
-                                                value = datetime.datetime.strptime(value, '%Y/%m/%d')
-                                            else:
-                                                value = datetime.datetime.strptime(value, '%Y-%m-%d')
-                                        elif fieldvaluelist[i][3] == ogr.OFTReal:
-                                            value = float(value)
-                                        elif fieldvaluelist[i][3] == ogr.OFTInteger:
-                                            try:
-                                                value = int(value)
-                                            except:
-                                                print('Error: fieldname {} has a value of {}.'.format(fieldname, value))
-                                                sys.exit()
-                                        elif fieldname == 'browseUrl':
-                                            if value:
-                                                if value.lower() != 'null':
-                                                    scenedict[sceneID]['browse'] = 'Y'
-                                                else:
-                                                    scenedict[sceneID]['browse'] = 'N'
-                                        elif fieldname == 'Data Type Level-1':
-                                            j = value.rfind('_') + 1
-                                            value = value[j:]
-                                        scenedict[sceneID][fieldname] = value
-                                elif fieldname in polycoords:
-                                    if 'Long' in fieldname:
-                                        k = 1
-                                    else:
-                                        k = 0
-                                    if fieldname.startswith('LL'): # Scene polygons start and end on lower left corner
-                                        for l in [0, 4]:
-                                            scenedict[sceneID]['coords'][js[fieldname[:2]] + l][k] = float(value)
-                                    else:
-                                        scenedict[sceneID]['coords'][js[fieldname[:2]]][k] = float(value)
-
-                    if not 'Spacecraft Identifier' in scenedict[sceneID].keys():
-                        scenedict[sceneID]['Spacecraft Identifier'] = 'LANDSAT_{}'.format(sceneID[2:3])
-    return scenedict
-
-def findlocalfiles(sceneID, fielddict, scenedict):
-#    for field in addfields[1:]:
-#        localfiledict[field] = None
-    itm = os.path.join(itmdir, '{}_ref_{}.dat'.format(sceneID, ieo.projacronym))
-    if not os.path.isfile(itm): # Populate 'SR_path' field if surface reflectance data are present in library
-        itmlist = glob.glob(os.path.join(itmdir, '{}*_ref_{}.dat'.format(sceneID[:16], ieo.projacronym)))
-        if len(itmlist) > 0:
-            itm = itmlist[0]
-        else:
-            itm = os.path.join(itmdir, '{}_ref_{}.dat'.format(scenedict[sceneID]['Landsat Product Identifier'], ieo.projacronym))
-            if not os.path.isfile(itm):
-                itm = None
-    if itm:
-        scenedict['SR_path'] = itm
-        itmbasename = os.path.basename(itm)
-        extloc =  itmbasename.find('_ref_')
-        scenebase = itmbasename[:extloc]
-        for key in fielddict.keys():
-            datafile = os.path.join(fielddict[key]['dirname'], '{}{}'.format(scenebase, fielddict[key]['ext']))
-            if os.path.isfile(datafile):
-                scenedict[key] = datafile
-                if key == 'PixQA_path':
-                    scenedict['MaskType'] = 'Pixel_QA'
-                elif key == 'Fmask_path':
-                    scenedict['MaskType'] = 'FMask'
-    return scenedict
+# def findlocalfiles(sceneID, fielddict, scenedict):
+# #    for field in addfields[1:]:
+# #        localfiledict[field] = None
+#     itm = os.path.join(itmdir, '{}_ref_{}.dat'.format(sceneID, ieo.projacronym))
+#     if not os.path.isfile(itm): # Populate 'SR_path' field if surface reflectance data are present in library
+#         itmlist = glob.glob(os.path.join(itmdir, '{}*_ref_{}.dat'.format(sceneID[:16], ieo.projacronym)))
+#         if len(itmlist) > 0:
+#             itm = itmlist[0]
+#         else:
+#             itm = os.path.join(itmdir, '{}_ref_{}.dat'.format(scenedict[sceneID]['Landsat Product Identifier'], ieo.projacronym))
+#             if not os.path.isfile(itm):
+#                 itm = None
+#     if itm:
+#         scenedict['SR_path'] = itm
+#         itmbasename = os.path.basename(itm)
+#         extloc =  itmbasename.find('_ref_')
+#         scenebase = itmbasename[:extloc]
+#         for key in fielddict.keys():
+#             datafile = os.path.join(fielddict[key]['dirname'], '{}{}'.format(scenebase, fielddict[key]['ext']))
+#             if os.path.isfile(datafile):
+#                 scenedict[key] = datafile
+#                 if key == 'PixQA_path':
+#                     scenedict['MaskType'] = 'Pixel_QA'
+#                 elif key == 'Fmask_path':
+#                     scenedict['MaskType'] = 'FMask'
+#     return scenedict
 
 ## Old XML functions, deprecated
 
-def dlxmls(startdate, enddate, xmls, ingestdir, *args, **kwargs): # This downloads queried XML files
+def dlxmls(args.startdate, args.enddate, ingestdir, prodlist, *args, **kwargs): # This downloads queried XML files
     #pathrows = [[207, 208, 21, 21],[205, 209, 22, 24]]
     global errorsfound
     tries = 1
     downloaded = False
-    for x, p in zip(xmls, pathrows):
+    startday = args.startdate
+    endday = startday + datetime.timedelta(days = 1)
+    while startday < args.endday:
+        for product in prodlist:
+            URL =  '{}footprint:"Intersects(POLYGON(({})))"%20AND%20filename:S5P_OFFL_L2__{}*%20AND%20beginposition:[{}%20TO%20{}]'.format(args.baseURL, args.MBR, product, startday, endday)
+            basexml = 'S5P_OFFL_L2__{}_{}_{}.xml'.format(product, startday, endday)
+            xml = os.path.join(metadatadir, basexml)
+            if not os.path.isfile(xml):
+                print('Now searching for Sentinel 5p for {} Level 2 product scene metadata acquired between {} and {}.'.format(product, startday, endday))
+                downloaded = False
+                while not downloaded and tries < 6:
+                    print('Download attempt {} of 5.'.format(tries))
+                    try:
+        #                url = urllib.request.urlopen(urlname)
+                        urlretrieve(urlname, xml) # filename=xml
+                        print('Download successful.')
+                        downloaded = True
+                    except URLError as e:
+                        print(e.reason)
+                        ieo.logerror(urlname, e.reason, errorfile = errorfile)
+                        errorsfound = True
+                        tries += 1
+                    if tries == 6:
+                        ieo.logerror(xml, 'Download error.', errorfile = errorfile)
+                        print('Download failure: {}'.format(x))
+                        errorsfound = True
+        startday = endday
+        endday += datetime.timedelta(days = 1)
 
-        print('Downloading {} to: {}'.format(x, ingestdir))
-        xml = os.path.join(ingestdir, x)
-        if os.access(xml, os.F_OK):
-            print('Backing up current xml file.')
-            shutil.move(xml, '{}.{}.bak'.format(xml, today.strftime('%Y%m%d-%H%M%S')))
-        urlname = 'http://earthexplorer.usgs.gov/EE/InventoryStream/pathrow?start_path={}&end_path={}&start_row={}&end_row={}&sensor_name=LANDSAT_COMBINED_C1&start_date={}&end_date={}'.format(p[0], p[1], p[2], p[3], startdate, enddate) #&cloud_cover = 100&seasonal = False&aoi_entry=path_row&output_type=unknown
-        tries = 1
-        downloaded = False
-        while not downloaded and tries < 6:
-            print('Download attempt {} of 5.'.format(tries))
-            try:
-#                url = urllib.request.urlopen(urlname)
-                urlretrieve(urlname, xml) # filename=xml
-                downloaded = True
-            except URLError as e:
-                print(e.reason)
-                ieo.logerror(urlname, e.reason, errorfile = errorfile)
-                errorsfound = True
-                tries += 1
-        if tries == 6:
-            ieo.logerror(xml, 'Download error.', errorfile = errorfile)
-            print('Download failure: {}'.format(x))
-            errorsfound = True
-    else:
-        return 'Success!'
 
 
 

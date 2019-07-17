@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-# By Guy Serbin, Environment, Soils, and Land Use Dept., CELUP, Teagasc,
-# Johnstown Castle, Co. Wexford Y35 TC97, Ireland
-# email: guy <dot> serbin <at> teagasc <dot> ie
+# By Guy Serbin, EOanalytics Ltd.
+# Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
+# email: guyserbin <at> eoanalytics <dot> ie
 
-# version 1.1.1
+# Irish Earth Observation (IEO) Python Module
+# version 1.2
 
 # This script creates VRTs from ingested Landsat data and catalogue files
 

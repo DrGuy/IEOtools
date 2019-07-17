@@ -21,18 +21,18 @@ except:
     print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
     ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
-        sys.path.append(r'D:\Data\IEO\ieo')
+        sys.path.append(ieodir)
         import ieo
     else:
         print('Error: that is not a valid path for the IEO module. Exiting.')
         sys.exit()
 
 if sys.version_info[0] == 2:
-    # import ConfigParser as configparser
+    import ConfigParser as configparser
     from urllib import urlretrieve
     from urllib2 import urlopen, URLError
 else:
-    # import configparser
+    import configparser
     from urllib.request import urlopen, urlretrieve
     from urllib.error import URLError
 
@@ -40,12 +40,12 @@ global pathrows, errorsfound
 
 config = ieo.config
 
-# config = configparser.ConfigParser()
+#config = configparser.ConfigParser()
 # config_location = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'updateshp.ini')
 
-# config.read(config_location) # config_path
-pathrowvals = config['landsat']['pathrowvals'] # this is a comma-delimited string containing multiples of four values: start path, end path, start row, end row. It is designed to query rectangular path/row combinations, in order to avoid scenes that don't touch landmasses or are not of interest.
-useWRS2 = config['landsat']['useWRS2'] # Setting this parameter to "Yes" in updateshp.ini will query WRS-2 Path/ Row field values from ieo.WRS2, and may result in a great increase in the number of queries to USGS servers
+#config.read(ieo.config_location) # config_path
+pathrowvals = config['Landsat']['pathrowvals'] # this is a comma-delimited string containing multiples of four values: start path, end path, start row, end row. It is designed to query rectangular path/row combinations, in order to avoid scenes that don't touch landmasses or are not of interest.
+useWRS2 = config['Landsat']['useWRS2'] # Setting this parameter to "Yes" in updateshp.ini will query WRS-2 Path/ Row field values from ieo.WRS2, and may result in a great increase in the number of queries to USGS servers
 
 parser = argparse.ArgumentParser('This script imports LEDAPS-processed scenes into the local library. It stacks images and converts them to the locally defined projection in IEO, and adds ENVI metadata.')
 #parser.add_argument('-x','--xml', type = bool, default = False, help = 'Use downloaded XML files from USGS.')
