@@ -18,7 +18,7 @@ except:
     print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
     ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
-        sys.path.append(r'D:\Data\IEO\ieo')
+        sys.path.append(ieodir)
         import ieo
     else:
         print('Error: that is not a valid path for the IEO module. Exiting.')
@@ -35,12 +35,18 @@ parser.add_argument('--nodataval', type = int, default = None, help = 'No data v
 parser.add_argument('--rowspath', type = int, default = 4, help = 'Max WRS-2 Rows per Path.')
 args = parser.parse_args()
 
-if args.indir:
+nodatavals = {'SR': '-9999', 'Fmask': '255', 'BT': '-9999', 'NDVI': '0', 'EVI': '0', 'pixel_qa': '1'}
+
+if args.indir and args.nodataval:
+    nodatavals = {os.path.basename(args.indir): args.nodataval}
+elif args.indir and not args.nodataval:
     indirs = [args.indir]
-    nodatavals = {args.indir: args.nodataval}
+    if not os.path.basename(args.indir) in nodatavals.keys():
+        args.nodataval = input('Error: --indir set and --nodataval not set. Please input a no data value:')
+        nodatavals = {args.indir: args.nodataval}
 else:
     indirs = [ieo.srdir, ieo.fmaskdir, ieo.btdir, ieo.ndvidir, ieo.evidir, ieo.pixelqadir]
-    nodatavals = {ieo.srdir: '-9999', ieo.fmaskdir: '255', ieo.btdir: '-9999', ieo.ndvidir: '0', ieo.evidir: '0', ieo.pixelqadir: '1'}
+    nodatavals = {'SR': '-9999', 'Fmask': '255', 'BT': '-9999', 'NDVI': '0', 'EVI': '0', 'pixel_qa': '1'}
 
 def makefiledict(dirname, year):
     if args.year:
@@ -49,16 +55,18 @@ def makefiledict(dirname, year):
         flist = glob.glob(os.path.join(dirname, 'L*.dat'))
     filedict = {}
     if len(flist) >= 2:
-        if len(os.path.basename(flist[0])) > 40:
+        if os.path.basename(flist[0]).find('_') == 3:
+            rangerow = [4, 4, 11]
+        elif len(os.path.basename(flist[0])) > 40:
             rangerow = [7, 10, 17]
         else:
             rangerow = [6, 9, 16]
-        if len(flist) == 2 and os.path.basename(flist[0])[rangerow[0]:rangerow[1]] == os.path.basename(flist[1])[rangerow[0]:rangerow[1]]:
+        if rangerow[0] != rangerow[1] and len(flist) == 2 and os.path.basename(flist[0])[rangerow[0]:rangerow[1]] == os.path.basename(flist[1])[rangerow[0]:rangerow[1]]:
             filedict = None
             return filedict
         for f in flist:
             basename = os.path.basename(f)
-            if not basename[9:16] in filedict.keys():
+            if not basename[rangerow[1]:rangerow[2]] in filedict.keys():
                 filedict[basename[rangerow[1]:rangerow[2]]] = [f]
             elif not f in filedict[basename[rangerow[1]:rangerow[2]]]:
                 filedict[basename[rangerow[1]:rangerow[2]]].append(f)
@@ -89,7 +97,11 @@ def getpathrows():
 def makevrtfilename(outdir, filelist):
     numscenes = len(filelist)
     basename = os.path.basename(filelist[0]).replace('.dat', '.vrt')
-    if len(basename) < 40:
+    if basename.find('_') == 3:
+        startrow = 0
+        endrow = 0
+        outbasename = '{}.vrt'.format(basename[:11])
+    elif len(basename) < 40:
         startrow = basename[8:9]
         endrow = os.path.basename(filelist[-1])[8:9]
         outbasename = '{}{}{}{}{}'.format(basename[:6], numscenes, startrow, endrow, basename[9:])
@@ -101,11 +113,18 @@ def makevrtfilename(outdir, filelist):
     return vrtfilename
 
 def writetocsv(catfile, vrt, filelist, d, pathrowdict):
-    minrow = min(pathrowdict['rows'])
+    if os.path.basename(vrt).find('_') == 3:
+        minrow = ''
+    else:
+        minrow = min(pathrowdict['rows'])
     datetuple = datetime.datetime.strptime(d, '%Y%j')
     scenelist = ['None'] * args.rowspath
     for f in filelist:
-        if len(os.path.basename(f)) < 40:
+        if os.path.basename(vrt).find('_') == 3:
+            sceneID = os.path.basename(f)[:11]
+            i = 0
+            path = 0
+        elif len(os.path.basename(f)) < 40:
             sceneID = os.path.basename(f)[:21]
             i = int(sceneID[7:9]) - minrow
             path = sceneID[3:6]
@@ -127,17 +146,18 @@ def writetocsv(catfile, vrt, filelist, d, pathrowdict):
     with open(catfile, 'a') as output:
         output.write('{}\n'.format(outline))
     
-def makevrt(filelist, catfile, vrt, datetuple, pathrowdict):
+def makevrt(filelist, catfile, vrt, d, pathrowdict):
     dirname, basename = os.path.split(vrt)
     print('Now creating VRT: {}'.format(basename))
-    proclist = ['gdalbuildvrt', '-srcnodata', nodatavals[os.path.dirname(filelist[0])], vrt]    
+    proclist = ['gdalbuildvrt', '-srcnodata', nodatavals[os.path.basename(os.path.dirname(filelist[0]))], vrt]    
 #    scenelist.append(vrt)
     for f in filelist:
         if f:
             proclist.append(f)
+#    print(proclist)
     p = Popen(proclist)
     print(p.communicate())
-    writetocsv(catfile, vrt, filelist, datetuple, pathrowdict)
+    writetocsv(catfile, vrt, filelist, d, pathrowdict)
 
 today = datetime.datetime.today()
 catdir = os.path.join(ieo.catdir, 'Landsat')

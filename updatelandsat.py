@@ -202,7 +202,7 @@ def scenesearch(apiKey, scenelist):
     # This searches the USGS archive for scene metadata, and checks it against local metadata. New scenes will be queried for metadata.
     RequestURL = '{}{}/search'.format(args.baseURL, args.version)
     QueryURL = '{}{}/metadata'.format(args.baseURL, args.version)
-    datasetNames = ['LANDSAT_8_C1', 'LANDSAT_ETM_C1', 'LANDSAT_TM_C1']
+    datasetNames = ['LANDSAT_8_C1', 'LANDSAT_ETM_C1']#, 'LANDSAT_TM_C1']
     scenedict = {}
     js = {'LL': 0, 'UL': 1, 'UR': 2, 'LR': 3}
     for datasetName in datasetNames:
@@ -242,7 +242,7 @@ def scenesearch(apiKey, scenelist):
             print('{} new scenes have been found, querying metadata.'.format(len(querylist)))
             iterations = math.ceil(len(querylist) / 100) # break up queries into blocks of 100 or less scenes
             total = 0
-            #iterations = 1 # temporary limitation
+#            iterations = 1 # temporary limitation
             for iteration in range(iterations):
                 startval = iteration * 100
                 if iteration * 100 > len(querylist):
@@ -260,14 +260,15 @@ def scenesearch(apiKey, scenelist):
                             "datasetName":datasetName,
                             'entityIds': querystr})
                 query = requests.post(QueryURL, data = {'jsonRequest':queryparams})
-#                if endval == 99:
-#                    outfile = r'd:\data\ieo\firstquery.txt'
-#                    with open(outfile, 'w') as output:
-#                        output.write(query.text)
+                if endval == 99:
+                    outfile = r'C:\Imagery\Landsat\Ingest\firstquery.txt'
+                    with open(outfile, 'w') as output:
+                        output.write(query.text)
                 querydict = json.loads(query.text)
                 if len(querydict['data']) > 0:
                     for item in querydict['data']:
                         if len(item['metadataFields']) > 0:
+                            scenedict[sceneID]['coords'] = item['spatialFootprint']['coordinates'][0]
                             for subitem in item['metadataFields']:
                                 fieldname = subitem['fieldName'].rstrip().lstrip().replace('L-1', 'L1')
                                 if fieldname == 'Landsat Scene Identifier':
@@ -301,16 +302,16 @@ def scenesearch(apiKey, scenelist):
                                             j = value.rfind('_') + 1
                                             value = value[j:]
                                         scenedict[sceneID][fieldname] = value
-                                elif fieldname in polycoords:
-                                    if 'Long' in fieldname:
-                                        k = 1
-                                    else:
-                                        k = 0
-                                    if fieldname.startswith('LL'): # Scene polygons start and end on lower left corner
-                                        for l in [0, 4]:
-                                            scenedict[sceneID]['coords'][js[fieldname[:2]] + l][k] = float(value)
-                                    else:
-                                        scenedict[sceneID]['coords'][js[fieldname[:2]]][k] = float(value)
+#                                elif fieldname in polycoords:
+#                                    if 'Long' in fieldname:
+#                                        k = 1
+#                                    else:
+#                                        k = 0
+#                                    if fieldname.startswith('LL'): # Scene polygons start and end on lower left corner
+#                                        for l in [0, 4]:
+#                                            scenedict[sceneID]['coords'][js[fieldname[:2]] + l][k] = float(value)
+#                                    else:
+#                                        scenedict[sceneID]['coords'][js[fieldname[:2]]][k] = float(value)
 
                     if not 'Spacecraft Identifier' in scenedict[sceneID].keys():
                         scenedict[sceneID]['Spacecraft Identifier'] = 'LANDSAT_{}'.format(sceneID[2:3])
@@ -787,7 +788,10 @@ if len(sceneIDs) > 0:
         ring = ogr.Geometry(ogr.wkbLinearRing)
         for coord in coords:
             ring.AddPoint(coord[0], coord[1])
+        if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
+            ring.AddPoint(coord[0][0], coord[0][1])
         # Create polygon
+        
         poly = ogr.Geometry(ogr.wkbPolygon)
 
         poly.AddGeometry(ring)
@@ -797,6 +801,9 @@ if len(sceneIDs) > 0:
         feature.Destroy()
         print('\n')
         filenum += 1
+        
+    print('Coords:')
+    print(coords)
 
 # Update metadata in shapefile
 #layer_defn = layer.GetLayerDefn()

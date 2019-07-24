@@ -16,7 +16,7 @@ except:
     print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
     ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
-        sys.path.append(r'D:\Data\IEO\ieo')
+        sys.path.append(ieodir)
         import ieo
     else:
         print('Error: that is not a valid path for the IEO module. Exiting.')
