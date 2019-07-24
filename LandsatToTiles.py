@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-# By Guy Serbin, EOanalytics Ltd.
-# Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
-# email: guyserbin <at> eoanalytics <dot> ie
+# By Guy Serbin, EOanalytics Ltd., Talent Garden Dublin, Claremont Ave.
+# Glasnevin, Dublin 11. D11 YNR2, Ireland
+# email: guy <at> eoanalytics <dot> ie
 
-# version 1.1.2
+# version 1.2
 
 # This script does the following:
-# 1. Extracts ESPA-processed Landsat imagery data from tar.gz files
+# 1. Modifies existing Landsat data on disk to NRT tiles. 
 # 2. Virtually stacks surface reflectance (SR) and brightness temperature (BT) bands. 
 # 3. Converts SR, BT, and Fmask data from UTM to the local projection.
 # 4. Calculates NDVI and EVI for clear land pixels
@@ -21,7 +21,7 @@ except:
     print('Error: IEO failed to load. Please input the location of the directory containing the IEO installation files.')
     ieodir = input('IEO installation path: ')
     if os.path.isfile(os.path.join(ieodir, 'ieo.py')):
-        sys.path.append(ieodir)
+        sys.path.append(r'D:\Data\IEO\ieo')
         import ieo
     else:
         print('Error: that is not a valid path for the IEO module. Exiting.')
