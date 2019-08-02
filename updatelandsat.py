@@ -823,35 +823,6 @@ if len(sceneIDs) > 0:
                     except Exception as e:
                         print('Error with SceneID {}, fieldname = {}, value = {}: {}'.format(sceneID, fnames[queryfieldnames.index(key)], scenedict[sceneID][key], e))
                         ieo.logerror(key, e, errorfile = errorfile)
-            basename = os.path.basename(dlurl)
-            jpg = os.path.join(jpgdir, basename)
-    
-    
-            if not os.access(jpg, os.F_OK) and args.thumbnails:
-                try:
-                    response = dlthumb(dlurl, jpgdir)
-                    if response == 'Success!':
-                        geom = feature.GetGeometryRef()
-                        print('Creating world file.')
-                        makeworldfile(jpg, geom)
-                        print('Migrating world and projection files to new directory.')
-                        jpw = jpg.replace('.jpg', '.jpw')
-                        prj = jpg.replace('.jpg', '.prj')
-                    else:
-                        print('Error with sceneID or filename, adding to error list.')
-                        ieo.logerror(sceneID, response, errorfile = errorfile)
-                        errorsfound = True
-                    if os.access(jpg, os.F_OK):
-                        feature.SetField('Thumb_JPG', jpg)
-    #                for key in scenedict[sceneID].keys():
-    #                    if scenedict[sceneID][key]:
-    #                        feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key])
-    
-                    layer.SetFeature(feature)
-                except Exception as e:
-                    print(e)
-                    ieo.logerror(os.path.basename(jpg), e, errorfile = errorfile)
-                    errorsfound = True
             
             coords = scenedict[sceneID]['coords']
             # Create ring
@@ -867,6 +838,33 @@ if len(sceneIDs) > 0:
             poly.AddGeometry(ring)
             poly.Transform(transform)   # Convert to local projection
             feature.SetGeometry(poly)
+            basename = os.path.basename(dlurl)
+            jpg = os.path.join(jpgdir, basename)
+            if not os.access(jpg, os.F_OK) and args.thumbnails:
+                try:
+                    response = dlthumb(dlurl, jpgdir)
+                    if response == 'Success!':
+                        geom = feature.GetGeometryRef()
+                        print('Creating world file.')
+                        makeworldfile(jpg, poly)
+                        print('Migrating world and projection files to new directory.')
+                        jpw = jpg.replace('.jpg', '.jpw')
+                        prj = jpg.replace('.jpg', '.prj')
+                    else:
+                        print('Error with sceneID or filename, adding to error list.')
+                        ieo.logerror(sceneID, response, errorfile = errorfile)
+                        errorsfound = True
+                    if os.access(jpg, os.F_OK):
+                        feature.SetField('Thumb_JPG', jpg)
+    #                for key in scenedict[sceneID].keys():
+    #                    if scenedict[sceneID][key]:
+    #                        feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key])
+    
+#                    layer.SetFeature(feature)
+                except Exception as e:
+                    print(e)
+                    ieo.logerror(os.path.basename(jpg), e, errorfile = errorfile)
+                    errorsfound = True
             layer.CreateFeature(feature)
             feature.Destroy()
         else:
