@@ -28,11 +28,11 @@ except:
         sys.exit()
 
 if sys.version_info[0] == 2:
-    import ConfigParser as configparser
+#    import ConfigParser as configparser
     from urllib import urlretrieve
     from urllib2 import urlopen, URLError
 else:
-    import configparser
+#    import configparser
     from urllib.request import urlopen, urlretrieve
     from urllib.error import URLError
 
@@ -61,6 +61,8 @@ parser.add_argument('-b', '--baseURL', type = str, default = 'https://earthexplo
 parser.add_argument('--maxResults', type = int, default = 50000, help = 'Maximum number of results to return (1 - 50000, default = 50000).')
 parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite existing files.')
 parser.add_argument('--thumbnails', type = bool, default = True, help = 'Download thumbnails (default = True).')
+parser.add_argument('--savequeries', action = 'store_true', help = 'Save queries.')
+parser.add_argument('--usesaved', action = 'store_true', help = 'Use any saved queries on disk, rather than online.')
 args = parser.parse_args()
 
 if not (args.username and args.password):
@@ -198,15 +200,19 @@ def getMBR():
         Ycoords.append(float(json_data["data"]["coordinates"][0]["latitude"]))
     return [min(Ycoords), min(Xcoords), max(Ycoords), max(Xcoords)]
 
-def scenesearch(apiKey, scenelist):
+def scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate):
     # This searches the USGS archive for scene metadata, and checks it against local metadata. New scenes will be queried for metadata.
     RequestURL = '{}{}/search'.format(args.baseURL, args.version)
     QueryURL = '{}{}/metadata'.format(args.baseURL, args.version)
-    datasetNames = ['LANDSAT_8_C1', 'LANDSAT_ETM_C1']#, 'LANDSAT_TM_C1']
+    datasetNames = ['LANDSAT_8_C1', 'LANDSAT_ETM_C1', 'LANDSAT_TM_C1']
     scenedict = {}
     js = {'LL': 0, 'UL': 1, 'UR': 2, 'LR': 3}
     for datasetName in datasetNames:
         print('Querying collection: {}'.format(datasetName))
+        if lastmodifiedDate and not (len(updatemissing) > 0 or len(badgeom) > 0):
+            startdate = lastmodifiedDate
+        else:
+            startdate = args.startdate
         searchparams = json.dumps({"apiKey": apiKey,
                         "datasetName": datasetName,
                         "spatialFilter":{"filterType": "mbr",
@@ -214,7 +220,7 @@ def scenesearch(apiKey, scenelist):
                                                       "longitude": args.MBR[1]},
                                          "upperRight":{"latitude": args.MBR[2],
                                                        "longitude": args.MBR[3]}},
-                        "temporalFilter":{"startDate": args.startdate,
+                        "temporalFilter":{"startDate": startdate,
                                           "endDate": args.enddate},
                         "includeUnknownCloudCover":False,
                         "maxCloudCover": 100,
@@ -225,7 +231,7 @@ def scenesearch(apiKey, scenelist):
         querylist = []
         for i in range(len(json_data['data']['results'])):
             sceneID = json_data['data']['results'][i]['entityId']
-            if sceneID[3:9] in pathrowstrs and not sceneID in scenelist:
+            if sceneID[3:9] in pathrowstrs and (not sceneID in scenelist or sceneID in updatemissing or sceneID in badgeom):
                 querylist.append(sceneID)
                 scenedict[sceneID] = {'Landsat Product Identifier': json_data['data']['results'][i]["displayId"],
                          "browseUrl": json_data['data']['results'][i]["browseUrl"],
@@ -233,13 +239,15 @@ def scenesearch(apiKey, scenelist):
                          "downloadUrl": json_data['data']['results'][i]["downloadUrl"],
                          "metadataUrl": json_data['data']['results'][i]["metadataUrl"],
                          "fgdcMetadataUrl": json_data['data']['results'][i]["fgdcMetadataUrl"],
-                         'modifiedDate': json_data['data']['results'][i]["modifiedDate"],
+                         'modifiedDate': datetime.datetime.strptime(json_data['data']['results'][i]["modifiedDate"], '%Y-%m-%d'),
                          "orderUrl": json_data['data']['results'][i]["orderUrl"],
                          'coords': [[0.0, 0.0]] * 5,
-                         'Dataset Identifier': datasetName}
+                         'Dataset Identifier': datasetName,
+                         'updatemodifiedDate': False,
+                         'updategeom': False}
 
         if len(querylist) > 0:
-            print('{} new scenes have been found, querying metadata.'.format(len(querylist)))
+            print('{} new scenes have been found or require updating, querying metadata.'.format(len(querylist)))
             iterations = math.ceil(len(querylist) / 100) # break up queries into blocks of 100 or less scenes
             total = 0
 #            iterations = 1 # temporary limitation
@@ -260,15 +268,27 @@ def scenesearch(apiKey, scenelist):
                             "datasetName":datasetName,
                             'entityIds': querystr})
                 query = requests.post(QueryURL, data = {'jsonRequest':queryparams})
-                if endval == 99:
-                    outfile = r'C:\Imagery\Landsat\Ingest\firstquery.txt'
+#                if endval == 99:
+                
+                if args.savequeries:
+                    now = datetime.datetime.now()
+                    outfile = os.path.join(ieo.ingestdir, 'query_{}_{}.txt'.format(datasetName, now.strftime('%Y%m%d-%H%M%S')))
                     with open(outfile, 'w') as output:
                         output.write(query.text)
                 querydict = json.loads(query.text)
                 if len(querydict['data']) > 0:
                     for item in querydict['data']:
                         if len(item['metadataFields']) > 0:
+                            if sceneID in badgeom or sceneID in updatemissing:
+                                scenedict[sceneID]['updatemodifiedDate'] = True 
+                            else: 
+                                scenedict[sceneID]['updatemodifiedDate'] = False 
+                            if sceneID in badgeom:
+                                scenedict[sceneID]['updategeom'] = True
+                            else: 
+                                scenedict[sceneID]['updategeom'] = False
                             scenedict[sceneID]['coords'] = item['spatialFootprint']['coordinates'][0]
+                            scenedict[sceneID]['modifiedDate'] = item['modifiedDate']
                             for subitem in item['metadataFields']:
                                 fieldname = subitem['fieldName'].rstrip().lstrip().replace('L-1', 'L1')
                                 if fieldname == 'Landsat Scene Identifier':
@@ -634,7 +654,12 @@ if not os.access(shapefile, os.F_OK):
 
 
 else:
+    lastupdate = None
+    lastmodifiedDate = None
     shpfnames = []
+    updatemissing = []
+    badgeom = []
+    reimport = []
     # Open existing shapefile with write access
     data_source = driver.Open(shapefile, 1)
     layer = data_source.GetLayer()
@@ -653,7 +678,49 @@ else:
 
     # Iterate through features and fetch sceneID values
     for feature in layer:
-        scenelist.append(feature.GetField("sceneID"))
+        datetuple = None
+        sceneID = feature.GetField("sceneID")
+        scenelist.append(sceneID)
+        if not feature.GetField('SensorID') in ['TM', 'ETM', 'OLI', 'TIRS', 'OLI_TIRS']:
+            print('ERROR: missing metadata for SceneID {}. Feature will be deleted from shapefile and reimported.'.format(sceneID))
+            ieo.logerror(sceneID, 'Feature missing metadata, deleted, reimportation required.')
+            reimport.append(datetime.datetime.strptime(sceneID[9:16], '%Y%j'))
+            layer.DeleteFeature(feature.GetFID())
+            
+        else:    
+            try:
+                mdate = feature.GetField('Updated')
+                datetuple = datetime.datetime.strptime(mdate, '%Y/%m/%d')
+                if not lastupdate or datetuple > lastupdate:
+                    lastupdate = datetuple
+                    lastmodifiedDate = mdate
+            except Exception as e:
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                print(exc_type, fname, exc_tb.tb_lineno)
+                print('ERROR: modifiedDate information missing for SceneID {}, adding to list.'.format(sceneID))
+                ieo.logerror(sceneID, 'Modification date missing.')
+                updatemissing.append(sceneID)
+            
+            
+            try:
+                geom = feature.GetGeometryRef()
+                env = geom.GetEnvelope()
+                if env[0] == env[1] or env[2] == env[3]:
+                    print('Bad geometry identified for SceneID {}, adding to the list.'.format(sceneID))
+                    ieo.logerror(sceneID, 'Bad/ missing geometry.')
+                    badgeom.append(sceneID)
+            except Exception as e:
+                exc_type, exc_obj, exc_tb = sys.exc_info()
+                fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+                print(exc_type, fname, exc_tb.tb_lineno)
+                print('Bad geometry identified for SceneID {}, adding to the list.'.format(sceneID))
+                ieo.logerror(sceneID, 'Bad/ missing geometry.')
+                badgeom.append(sceneID)
+
+if len(reimport) > 0 and lastupdate:
+    if min(reimport) < lastupdate:
+        lastmodifiedDate = datetime.datetime.strftime('%Y-%m-%d', min(reimport))
 
 fielddict = {'BT_path' : {'ext' : '_BT_{}.dat'.format(ieo.projacronym), 'dirname' : ieo.btdir},
             'Fmask_path' : {'ext' : '_cfmask.dat', 'dirname' : ieo.fmaskdir},
@@ -670,9 +737,9 @@ apiKey = getapiKey()
 
 # run query
 
-scenedict = scenesearch(apiKey, scenelist)
+scenedict = scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate)
 sceneIDs = scenedict.keys()
-print('Total scenes to be added to shapefile: {}'.format(len(sceneIDs)))
+print('Total scenes to be added or updated to shapefile: {}'.format(len(sceneIDs)))
 
 #numfiles = len(xmls)
 #xmldict = {}
@@ -719,92 +786,127 @@ print('Total scenes to be added to shapefile: {}'.format(len(sceneIDs)))
 if len(sceneIDs) > 0:
     for sceneID in sceneIDs:
         print('Processing {}, scene number {} of {}.'.format(sceneID, filenum, len(sceneIDs)))
-        scenedict = findlocalfiles(sceneID, fielddict, scenedict)
-        if scenedict[sceneID]['browseUrl'].endswith('.jpg'):
-            dlurl = scenedict[sceneID]['browseUrl']
-            thumbnails.append(scenedict[sceneID]['browseUrl'])
-
-        print('\nAdding {} to shapefile.'.format(sceneID))
-        scenelist.append(sceneID)
-        # Determine polygon coordinates in Lat/ Lon WGS-84
-        coords = scenedict[sceneID]['coords']
-        '''[
-[float(tdict['upperLeftCornerLongitude']), float(tdict['upperLeftCornerLatitude'])],
-[float(tdict['upperRightCornerLongitude']), float(tdict['upperRightCornerLatitude'])],
-[float(tdict['lowerRightCornerLongitude']), float(tdict['lowerRightCornerLatitude'])],
-[float(tdict['lowerLeftCornerLongitude']), float(tdict['lowerLeftCornerLatitude'])], [float(tdict['upperLeftCornerLongitude']), float(tdict['upperLeftCornerLatitude'])]] '''
-        # create the feature
-        feature = ogr.Feature(layer.GetLayerDefn())
-        # Add field attributes from XML
-#                for k in range(len(root[i])):
-#                    if root[i][k].tag[j:] in headervals:
-#                        m = tags.index(root[i][k].tag[j:])
-#                        feature.SetField(root[i][k].tag[j:], root[i][k].text)
-        feature.SetField('sceneID', sceneID)
-        for key in scenedict[sceneID].keys():
-
-#            print('key = {}, type = {}, value = '.format(key, type(scenedict[sceneID][key])))
-#            print(scenedict[sceneID][key])
-            if (scenedict[sceneID][key]) and key in queryfieldnames:
-                #print('key = {}, type = {}.'.format(key, type(scenedict[sceneID][key])))
+        if not (scenedict[sceneID]['updategeom'] or scenedict[sceneID]['updatemodifiedDate']):
+            scenedict = findlocalfiles(sceneID, fielddict, scenedict)
+            if scenedict[sceneID]['browseUrl'].endswith('.jpg'):
+                dlurl = scenedict[sceneID]['browseUrl']
+                thumbnails.append(scenedict[sceneID]['browseUrl'])
+    
+            print('\nAdding {} to shapefile.'.format(sceneID))
+            scenelist.append(sceneID)
+            # Determine polygon coordinates in Lat/ Lon WGS-84
+            
+            '''[
+    [float(tdict['upperLeftCornerLongitude']), float(tdict['upperLeftCornerLatitude'])],
+    [float(tdict['upperRightCornerLongitude']), float(tdict['upperRightCornerLatitude'])],
+    [float(tdict['lowerRightCornerLongitude']), float(tdict['lowerRightCornerLatitude'])],
+    [float(tdict['lowerLeftCornerLongitude']), float(tdict['lowerLeftCornerLatitude'])], [float(tdict['upperLeftCornerLongitude']), float(tdict['upperLeftCornerLatitude'])]] '''
+            # create the feature
+            feature = ogr.Feature(layer.GetLayerDefn())
+            # Add field attributes from XML
+    #                for k in range(len(root[i])):
+    #                    if root[i][k].tag[j:] in headervals:
+    #                        m = tags.index(root[i][k].tag[j:])
+    #                        feature.SetField(root[i][k].tag[j:], root[i][k].text)
+            feature.SetField('sceneID', sceneID)
+            for key in scenedict[sceneID].keys():
+    
+    #            print('key = {}, type = {}, value = '.format(key, type(scenedict[sceneID][key])))
+    #            print(scenedict[sceneID][key])
+                if (scenedict[sceneID][key]) and key in queryfieldnames:
+                    #print('key = {}, type = {}.'.format(key, type(scenedict[sceneID][key])))
+                    try:
+                        if fieldvaluelist[queryfieldnames.index(key)][3] == ogr.OFTDate:
+                            feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key].year, scenedict[sceneID][key].month, scenedict[sceneID][key].day, scenedict[sceneID][key].hour, scenedict[sceneID][key].minute, scenedict[sceneID][key].second, 100)
+                        else:
+                            feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key])
+                    except Exception as e:
+                        print('Error with SceneID {}, fieldname = {}, value = {}: {}'.format(sceneID, fnames[queryfieldnames.index(key)], scenedict[sceneID][key], e))
+                        ieo.logerror(key, e, errorfile = errorfile)
+            basename = os.path.basename(dlurl)
+            jpg = os.path.join(jpgdir, basename)
+    
+    
+            if not os.access(jpg, os.F_OK) and args.thumbnails:
                 try:
-                    if fieldvaluelist[queryfieldnames.index(key)][3] == ogr.OFTDate:
-                        feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key].year, scenedict[sceneID][key].month, scenedict[sceneID][key].day, scenedict[sceneID][key].hour, scenedict[sceneID][key].minute, scenedict[sceneID][key].second, 100)
+                    response = dlthumb(dlurl, jpgdir)
+                    if response == 'Success!':
+                        geom = feature.GetGeometryRef()
+                        print('Creating world file.')
+                        makeworldfile(jpg, geom)
+                        print('Migrating world and projection files to new directory.')
+                        jpw = jpg.replace('.jpg', '.jpw')
+                        prj = jpg.replace('.jpg', '.prj')
                     else:
-                        feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key])
+                        print('Error with sceneID or filename, adding to error list.')
+                        ieo.logerror(sceneID, response, errorfile = errorfile)
+                        errorsfound = True
+                    if os.access(jpg, os.F_OK):
+                        feature.SetField('Thumb_JPG', jpg)
+    #                for key in scenedict[sceneID].keys():
+    #                    if scenedict[sceneID][key]:
+    #                        feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key])
+    
+                    layer.SetFeature(feature)
                 except Exception as e:
-                    print('Error with SceneID {}, fieldname = {}, value = {}: {}'.format(sceneID, fnames[queryfieldnames.index(key)], scenedict[sceneID][key], e))
-                    ieo.logerror(key, e, errorfile = errorfile)
-        basename = os.path.basename(dlurl)
-        jpg = os.path.join(jpgdir, basename)
-
-
-        if not os.access(jpg, os.F_OK) and args.thumbnails:
-            try:
-                response = dlthumb(dlurl, jpgdir)
-                if response == 'Success!':
-                    geom = feature.GetGeometryRef()
-                    print('Creating world file.')
-                    makeworldfile(jpg, geom)
-                    print('Migrating world and projection files to new directory.')
-                    jpw = jpg.replace('.jpg', '.jpw')
-                    prj = jpg.replace('.jpg', '.prj')
-                else:
-                    print('Error with sceneID or filename, adding to error list.')
-                    ieo.logerror(sceneID, response, errorfile = errorfile)
+                    print(e)
+                    ieo.logerror(os.path.basename(jpg), e, errorfile = errorfile)
                     errorsfound = True
-                if os.access(jpg, os.F_OK):
-                    feature.SetField('Thumb_JPG', jpg)
-#                for key in scenedict[sceneID].keys():
-#                    if scenedict[sceneID][key]:
-#                        feature.SetField(fnames[queryfieldnames.index(key)], scenedict[sceneID][key])
-
-                layer.SetFeature(feature)
-            except Exception as e:
-                print(e)
-                ieo.logerror(os.path.basename(jpg), e, errorfile = errorfile)
-                errorsfound = True
-        # Create ring
-        ring = ogr.Geometry(ogr.wkbLinearRing)
-        for coord in coords:
-            ring.AddPoint(coord[0], coord[1])
-        if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
-            ring.AddPoint(coord[0][0], coord[0][1])
-        # Create polygon
-        
-        poly = ogr.Geometry(ogr.wkbPolygon)
-
-        poly.AddGeometry(ring)
-        poly.Transform(transform)   # Convert to local projection
-        feature.SetGeometry(poly)
-        layer.CreateFeature(feature)
-        feature.Destroy()
-        print('\n')
+            
+            coords = scenedict[sceneID]['coords']
+            # Create ring
+            ring = ogr.Geometry(ogr.wkbLinearRing)
+            for coord in coords:
+                ring.AddPoint(coord[0], coord[1])
+            if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
+                ring.AddPoint(coord[0][0], coord[0][1])
+            # Create polygon
+            
+            poly = ogr.Geometry(ogr.wkbPolygon)
+    
+            poly.AddGeometry(ring)
+            poly.Transform(transform)   # Convert to local projection
+            feature.SetGeometry(poly)
+            layer.CreateFeature(feature)
+            feature.Destroy()
+        else:
+            layer.ResetReading()
+            for feature in layer:
+                if feature.GetField('sceneID') == sceneID:
+                    if scenedict[sceneID]['updategeom']: 
+                        print('Updating geometry for SceneID {}.'.format(sceneID))
+                        coords = scenedict[sceneID]['coords']
+                        # Create ring
+                        ring = ogr.Geometry(ogr.wkbLinearRing)
+                        for coord in coords:
+                            ring.AddPoint(coord[0], coord[1])
+                        if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
+                            ring.AddPoint(coord[0][0], coord[0][1])
+                        # Create polygon
+                        
+                        poly = ogr.Geometry(ogr.wkbPolygon)
+                
+                        poly.AddGeometry(ring)
+                        poly.Transform(transform)   # Convert to local projection
+                        feature.SetGeometry(poly)
+                        
+                    if scenedict[sceneID]['updatemodifiedDate']:
+#                        try:
+                        print('Updating modification date for SceneID {}.'.format(sceneID))
+#                        if  isinstance(scenedict[sceneID]['modifiedDate'], str):
+#                            scenedict[sceneID]['modifiedDate'] = datetime.datetime.strptime(scenedict[sceneID]['modifiedDate'], '%Y-%m-%d')
+                        feature.SetField('Updated', scenedict[sceneID]['modifiedDate'])
+#                        except Exception as e:
+#                            exc_type, exc_obj, exc_tb = sys.exc_info()
+#                            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+#                            print(exc_type, fname, exc_tb.tb_lineno)
+#                            print('ERROR: modifiedDate information ("{}") not set for SceneID {}, adding to list.'.format(scenedict[sceneID]['modifiedDate'], sceneID))
+#                            ieo.logerror(sceneID, 'Error setting "Updated" field.')
+                    layer.SetFeature(feature)
+                    feature.Destroy()
+#        print('\n')
         filenum += 1
-        
-    print('Coords:')
-    print(coords)
-
+    
 # Update metadata in shapefile
 #layer_defn = layer.GetLayerDefn()
 #field_names = [layer_defn.GetFieldDefn(i).GetName() for i in range(layer_defn.GetFieldCount())]
@@ -842,8 +944,8 @@ if len(sceneIDs) > 0:
 
 data_source = None
 
-if errorsfound:
-    print('Errors were found during script execution. please see the error log file for details: {}'.format(errorfile))
+#if errorsfound:
+#    print('Errors were found during script execution. Please see the error log file for details: {}'.format(errorfile))
 
 print('Processing complete.')
 

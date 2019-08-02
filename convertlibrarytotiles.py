@@ -44,8 +44,8 @@ parser.add_argument('-m', '--move', type = bool, default = False, help = 'Move i
 parser.add_argument('-r','--remove', type = bool, default = False, help = 'Remove temporary files after ingest.')
 parser.add_argument('-o','--outdir', type = str, default = None, help = 'Output directory for tiles.')
 parser.add_argument('-v','--vrt', type = bool, default = False, help = 'Use VRTs rather than input files.')
-parser.add_argument('-k','--skipqa', action='store_true', help = 'Skip conversion of Pixel QA and Fmask files.')
-parser.add_argument('-nu','--noupdate', action='store_true', help = 'Do not update tiles with new data.')
+parser.add_argument('-k','--skipqa', action = 'store_true', help = 'Skip conversion of Pixel QA and Fmask files.')
+parser.add_argument('-nu','--noupdate', action = 'store_true', help = 'Do not update tiles with new data.')
 args = parser.parse_args()
 
 dirs = [args.pixelqadir, args.fmaskdir, args.srdir, args.btdir, args.ndvidir, args.evidir]
