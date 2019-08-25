@@ -74,9 +74,9 @@ def makefiledict(dirname, year):
 
 def getpathrows():
     pathrowdict = {'paths': {}, 'rows': []}
-    driver = ogr.GetDriverByName("ESRI Shapefile")
-    data_source = driver.Open(ieo.WRS2, 0)
-    layer = data_source.GetLayer()
+    driver = ogr.GetDriverByName("GPKG")
+    data_source = driver.Open(ieo.ieogpkg, 0)
+    layer = data_source.GetLayer(ieo.WRS2)
     for feature in layer:
         path = feature.GetField('PATH')
         row = feature.GetField('ROW')

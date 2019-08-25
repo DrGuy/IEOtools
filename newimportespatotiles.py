@@ -3,16 +3,16 @@
 # Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
 # email: guyserbin <at> eoanalytics <dot> ie
 
-# version 1.1.2
+# version 1.3
 
 # This script does the following:
 # 1. Extracts ESPA-processed Landsat imagery data from tar.gz files
 # 2. Virtually stacks surface reflectance (SR) and brightness temperature (BT) bands. 
-# 3. Converts SR, BT, and Fmask data from UTM to the local projection.
-# 4. Calculates NDVI and EVI for clear land pixels
+# 3. Converts SR, BT, and Fmask data from UTM to the local projection and to NRT tiles.
+# 4. Calculates NDVI and EVI for clear land pixels and to NRT tiles
 # 5. Archives tar.gz files after use
 
-import os, sys, glob, datetime, argparse#, ieo, shutil
+import os, sys, glob, datetime, shutil, argparse#, ieo
 from osgeo import ogr
 
 try: # This is included as the module may not properly install in Anaconda.
@@ -39,6 +39,7 @@ parser.add_argument('-n', '--ndvidir', type = str, default = ieo.ndvidir, help =
 parser.add_argument('-e', '--evidir', type = str, default = ieo.evidir, help = 'EVI output directory')
 parser.add_argument('-a', '--archdir', type = str, default = ieo.archdir, help = 'Original data archive directory')
 parser.add_argument('--overwrite', type = bool, default = False, help = 'Overwrite existing files.')
+parser.add_argument('-nu','--noupdate', action = 'store_true', help = 'Do not update tiles with new data.')
 parser.add_argument('-d', '--delay', type = int, default = 0, help = 'Delay execution of script in seconds.')
 parser.add_argument('-r','--remove', type = bool, default = False, help = 'Remove temporary files after ingest.')
 args = parser.parse_args()
@@ -61,7 +62,7 @@ today = datetime.datetime.today()
 
 # In case there are any errors during script execution
 errorfile = 'newespaimport_errors_{}.csv'.format(today.strftime('%Y%m%d_%H%M%S'))
-#ieo.errorfile = errorfile
+ieo.errorfile = errorfile
 
 def sceneidfromfilename(filename):
     basename = os.path.basename(filename)
@@ -79,12 +80,12 @@ def sceneidfromfilename(filename):
 
 
 # Open up ieo.landsatshp and get the existing Product ID, Scene ID, and SR_path status
-driver = ogr.GetDriverByName("GPKG")
-data_source = driver.Open(ieo.catgpkg, 0)
-layer = data_source.GetLayer(ieo.landsatshp)
+driver = ogr.GetDriverByName("ESRI Shapefile")
+data_source = driver.Open(ieo.landsatshp, 0)
+layer = data_source.GetLayer()
 for feature in layer:
     sceneID = feature.GetField('sceneID')
-    scenedict[sceneID] = {'ProductID' : feature.GetField('Landsat_Product_ID'), 'sceneID' : sceneID, 'SR_path' : feature.GetField('Surface_Reflectance_tiles')}
+    scenedict[sceneID] = {'ProductID' : feature.GetField('LandsatPID'), 'sceneID' : sceneID, 'SR_path' : feature.GetField('SR_path')}
 data_source = None
 
 # This look finds any existing processed data 
@@ -124,16 +125,13 @@ for f in filelist:
     basename = os.path.basename(f)
     scene = basename[:16]
     if args.overwrite or not any(scene in x for x in reflist):
-#        try:
-        print('\nProcessing archive {}, file number {} of {}.\n'.format(f, filenum, numfiles))
-        ieo.importespatotiles(f, remove = args.remove, overwrite = args.overwrite)
-#        except Exception as e:
-#            print('There was a problem processing the scene. Adding to error list.')
-#            exc_type, exc_obj, exc_tb = sys.exc_info()
-#            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-#            print(exc_type, fname, exc_tb.tb_lineno)
-#            print(e)
-#            ieo.logerror(f, '{} {} {}'.format(exc_type, fname, exc_tb.tb_lineno))
+        try:
+            print('\nProcessing archive {}, file number {} of {}.\n'.format(f, filenum, numfiles))
+            ieo.importespatotiles(f, remove = args.remove, overwrite = args.overwrite, noupdate = args.noupdate)
+        except Exception as e:
+            print('There was a problem processing the scene. Adding to error list.')
+            print(e)
+            ieo.logerror(f, e)
     else:
         print('Scene {} has already been processed, skipping file number {} of {}.'.format(scene, filenum, numfiles))
     filenum += 1

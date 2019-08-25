@@ -12,8 +12,8 @@
 # 4. Calculates NDVI and EVI for clear land pixels
 # 5. Archives tar.gz files after use
 
-import os, sys, glob, datetime, shutil, argparse#, ieo
-from osgeo import ogr
+import os, sys, glob, argparse#, ieo, datetime, shutil
+#from osgeo import ogr
 
 try: # This is included as the module may not properly install in Anaconda.
     import ieo
