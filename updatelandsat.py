@@ -3,13 +3,14 @@
 # Talent Garden Dublin, Claremont Ave. Glasnevin, Dublin 11, Ireland
 # email: guyserbin <at> eoanalytics <dot> ie
 
-# version 1.3
+# version 1.3.1
 
 # This script will create and update a geopackage layer of all available Landsat TM/ETM+/OLI-TIRS scenes, including available metadata
 # Changes:
 # 23 May 2018: XML functionality deprecated in favor of JSON queries, as the former is no longer available or efficient
 # 25 March 2019: This script will now read configuration data from ieo.ini
 # 14 August 2019: This now creates and updates a layer within a geopackage, and will migrate data from an old shapefile to a new one
+# 12 January 2021: Modified to support Landsat Collection 2
 
 import os, sys, urllib.error, datetime, shutil, glob, argparse, json, getpass, requests, math #, ieo
 from osgeo import ogr, osr
@@ -46,7 +47,7 @@ parser = argparse.ArgumentParser('This script imports LEDAPS-processed scenes in
 parser.add_argument('-u','--username', type = str, default = None, help = 'USGS/EROS Registration System (ERS) username.')
 parser.add_argument('-p', '--password', type = str, default = None, help = 'USGS/EROS Registration System (ERS) password.')
 parser.add_argument('-c', '--catalogID', type = str, default = 'EE', help = 'USGS/EROS Catalog ID (default = "EE").')
-parser.add_argument('-v', '--version', type = str, default = "1.4.0", help = 'JSON version, default = 1.4.0.')
+parser.add_argument('-v', '--version', type = str, default = "1.4.1", help = 'JSON version, default = 1.4.1.')
 parser.add_argument('--startdate', type = str, default = "1982-07-16", help = 'Start date for query in YYYY-MM-DD format. (Default = 1982-07-16, e.g., Landsat 4 launch date).')
 parser.add_argument('--enddate', type = str, default = None, help = "End date for query in YYYY-MM-DD format. (Default = today's date).")
 parser.add_argument('-m', '--MBR', type = str, default = None, help = 'Minimum Bounding Rectangle (MBR) coordinates in decimal degrees in the following format (comma delimited, no spaces): lower left latitude, lower left longitude, upper right latitude, upper right longitude. If not supplied, these will be determined from WRS-2 Paths and Rows in updateshp.ini.')
@@ -143,6 +144,7 @@ def getMBR():
         requestURL = '{}?jsonRequest={}'.format(URL, jsonRequest)
         response = requests.post(requestURL) # URL, data = {'jsonRequest': jsonRequest}
         json_data = json.loads(response.text)
+        # print(response.text)
         Xcoords.append(float(json_data["data"]["coordinates"][0]["longitude"]))
         Ycoords.append(float(json_data["data"]["coordinates"][0]["latitude"]))
     return [min(Ycoords), min(Xcoords), max(Ycoords), max(Xcoords)]
@@ -151,7 +153,7 @@ def scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate):
     # This searches the USGS archive for scene metadata, and checks it against local metadata. New scenes will be queried for metadata.
     RequestURL = '{}{}/search'.format(args.baseURL, args.version)
     QueryURL = '{}{}/metadata'.format(args.baseURL, args.version)
-    datasetNames = {'LANDSAT_8_C1' : '2013-02-11', 'LANDSAT_ETM_C1' : '1999-04-15', 'LANDSAT_TM_C1' : '1982-07-16'}
+    datasetNames = {'landsat_ot_c2_l2' : '2013-02-11', 'landsat_etm_c2_l2' : '1999-04-15', 'landsat_tm_c2_l2' : '1982-07-16'}
     scenedict = {}
 #    js = {'LL': 0, 'UL': 1, 'UR': 2, 'LR': 3}
     for datasetName in datasetNames.keys():
@@ -167,7 +169,7 @@ def scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate):
         if datetuple < sensorstarttuple:
             datetuple = sensorstarttuple
         enddatetuple = datetime.datetime.strptime(args.enddate, '%Y-%m-%d')
-        if datasetName == 'LANDSAT_TM_C1':
+        if datasetName == 'landsat_tm_c2_l2':
             l5enddatetuple = datetime.datetime.strptime('2013-06-05', '%Y-%m-%d') # end of Landsat 5 mission
             if l5enddatetuple < enddatetuple:
                 enddatetuple = l5enddatetuple
@@ -194,6 +196,7 @@ def scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate):
             response = requests.post(RequestURL, data = {'jsonRequest': searchparams})
             json_data = json.loads(response.text)
             querylist = []
+            # print(response.text)
             for i in range(len(json_data['data']['results'])):
                 sceneID = json_data['data']['results'][i]['entityId']
                 if sceneID[3:9] in pathrowstrs and (not sceneID in scenelist or sceneID in updatemissing or sceneID in badgeom):
@@ -204,11 +207,19 @@ def scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate):
                              "downloadUrl": json_data['data']['results'][i]["downloadUrl"],
                              "metadataUrl": json_data['data']['results'][i]["metadataUrl"],
                              "fgdcMetadataUrl": json_data['data']['results'][i]["fgdcMetadataUrl"],
-                             'modifiedDate': datetime.datetime.strptime(json_data['data']['results'][i]["modifiedDate"], '%Y-%m-%d'),
+                             # 'modifiedDate': datetime.datetime.strptime(json_data['data']['results'][i]["modifiedDate"], '%Y-%m-%d'),
                              "orderUrl": json_data['data']['results'][i]["orderUrl"],
                              'Dataset Identifier': datasetName,
                              'updatemodifiedDate': False,
                              'updategeom': False}
+                    if json_data['data']['results'][i]["modifiedDate"] == 'Unknown':
+                        scenedict[sceneID]['modifiedDate'] = datetime.datetime.strptime(json_data['data']['results'][i]["acquisitionDate"], '%Y-%m-%d')
+                    elif ' ' in json_data['data']['results'][i]["modifiedDate"]:
+                        print(json_data['data']['results'][i]["modifiedDate"])
+                        space = json_data['data']['results'][i]["modifiedDate"].find(' ')
+                        scenedict[sceneID]['modifiedDate'] = datetime.datetime.strptime(json_data['data']['results'][i]["modifiedDate"][:space], '%Y-%m-%d')
+                    else:
+                        scenedict[sceneID]['modifiedDate'] = datetime.datetime.strptime(json_data['data']['results'][i]["modifiedDate"], '%Y-%m-%d')
     
             if len(querylist) > 0:
                 print('{} new scenes have been found or require updating, querying metadata.'.format(len(querylist)))
@@ -231,70 +242,77 @@ def scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate):
                     queryparams = json.dumps({"apiKey":apiKey,
                                 "datasetName":datasetName,
                                 'entityIds': querystr})
-                    query = requests.post(QueryURL, data = {'jsonRequest':queryparams})
-    #                if endval == 99:
-                    
-                    if args.savequeries:
-                        now = datetime.datetime.now()
-                        outfile = os.path.join(ieo.ingestdir, 'query_{}_{}.txt'.format(datasetName, now.strftime('%Y%m%d-%H%M%S')))
-                        with open(outfile, 'w') as output:
-                            output.write(query.text)
-                    querydict = json.loads(query.text)
-                    if len(querydict['data']) > 0:
+                    try:
+                        query = requests.post(QueryURL, data = {'jsonRequest':queryparams})
+        #                if endval == 99:
                         
-                        for item in querydict['data']:
-                            if len(item['metadataFields']) > 0:
-                                if item['metadataFields'][1]['fieldName'] == 'Landsat Scene Identifier':
-                                    sceneID = item['metadataFields'][1]['value']
-                                else:
+                        if args.savequeries:
+                            now = datetime.datetime.now()
+                            outfile = os.path.join(ieo.ingestdir, 'query_{}_{}.txt'.format(datasetName, now.strftime('%Y%m%d-%H%M%S')))
+                            with open(outfile, 'w') as output:
+                                output.write(query.text)
+                        querydict = json.loads(query.text)
+                        if len(querydict['data']) > 0:
+                            
+                            for item in querydict['data']:
+                                if len(item['metadataFields']) > 0:
+                                    if item['metadataFields'][1]['fieldName'] == 'Landsat Scene Identifier':
+                                        sceneID = item['metadataFields'][1]['value']
+                                    else:
+                                        for subitem in item['metadataFields']:
+                                            if subitem['fieldName']  == 'Landsat Scene Identifier':
+                                                sceneID = subitem['value']
+                                                break
                                     for subitem in item['metadataFields']:
-                                        if subitem['fieldName']  == 'Landsat Scene Identifier':
-                                            sceneID = subitem['value']
-                                            break
-                                for subitem in item['metadataFields']:
-                                    fieldname = subitem['fieldName'].rstrip().lstrip().replace('L-1', 'L1')
-                                    if fieldname in queryfieldnames and not fieldname in scenedict[sceneID].keys() and fieldname != 'Landsat Scene Identifier':
-                                        value = subitem['value']
-                                        if value:
-                                            i = queryfieldnames.index(fieldname)
-                                            if fieldvaluelist[i][3] == ogr.OFTDate or fieldname.endswith('Date'):
-                                                if 'Time' in fieldname:
-                                                    value = datetime.datetime.strptime(value[:-1], '%Y:%j:%H:%M:%S.%f')
-                                                elif '/' in value:
-                                                    value = datetime.datetime.strptime(value, '%Y/%m/%d')
-                                                else:
-                                                    value = datetime.datetime.strptime(value, '%Y-%m-%d')
-                                            elif fieldvaluelist[i][3] == ogr.OFTReal:
-                                                value = float(value)
-                                            elif fieldvaluelist[i][3] == ogr.OFTInteger:
-                                                try:
-                                                    value = int(value)
-                                                except:
-                                                    print('Error: fieldname {} has a value of {}.'.format(fieldname, value))
-                                                    sys.exit()
-                                            elif fieldname == 'browseUrl':
-                                                if value:
-                                                    if value.lower() != 'null':
-                                                        scenedict[sceneID]['browse'] = 'Y'
+                                        fieldname = subitem['fieldName'].rstrip().lstrip().replace('L-1', 'L1')
+                                        if fieldname in queryfieldnames and not fieldname in scenedict[sceneID].keys() and fieldname != 'Landsat Scene Identifier':
+                                            value = subitem['value']
+                                            if value:
+                                                i = queryfieldnames.index(fieldname)
+                                                if fieldvaluelist[i][3] == ogr.OFTDate or fieldname.endswith('Date'):
+                                                    if 'Time' in fieldname:
+                                                        value = datetime.datetime.strptime(value[:-1], '%Y:%j:%H:%M:%S.%f')
+                                                    elif '/' in value:
+                                                        value = datetime.datetime.strptime(value, '%Y/%m/%d')
                                                     else:
-                                                        scenedict[sceneID]['browse'] = 'N'
-                                            elif fieldname == 'Data Type Level-1':
-                                                j = value.rfind('_') + 1
-                                                value = value[j:]
-                                            scenedict[sceneID][fieldname] = value
-                                if sceneID in badgeom or sceneID in updatemissing:
-                                    scenedict[sceneID]['updatemodifiedDate'] = True 
-                                else: 
-                                    scenedict[sceneID]['updatemodifiedDate'] = False 
-                                if sceneID in badgeom:
-                                    scenedict[sceneID]['updategeom'] = True
-                                else: 
-                                    scenedict[sceneID]['updategeom'] = False
-                                scenedict[sceneID]['coords'] = item['spatialFootprint']['coordinates'][0]
-                                scenedict[sceneID]['modifiedDate'] = item['modifiedDate']
+                                                        value = datetime.datetime.strptime(value, '%Y-%m-%d')
+                                                elif fieldvaluelist[i][3] == ogr.OFTReal:
+                                                    value = float(value)
+                                                elif fieldvaluelist[i][3] == ogr.OFTInteger:
+                                                    try:
+                                                        value = int(value)
+                                                    except:
+                                                        print('Error: fieldname {} has a value of {}, changing to -9999.'.format(fieldname, value))
+                                                        value = -9999
+                                                elif fieldname == 'browseUrl':
+                                                    if value:
+                                                        if value.lower() != 'null':
+                                                            scenedict[sceneID]['browse'] = 'Y'
+                                                        else:
+                                                            scenedict[sceneID]['browse'] = 'N'
+                                                elif fieldname == 'Data Type Level-1':
+                                                    j = value.rfind('_') + 1
+                                                    value = value[j:]
+                                                scenedict[sceneID][fieldname] = value
+                                    if sceneID in badgeom or sceneID in updatemissing:
+                                        scenedict[sceneID]['updatemodifiedDate'] = True 
+                                    else: 
+                                        scenedict[sceneID]['updatemodifiedDate'] = False 
+                                    if sceneID in badgeom:
+                                        scenedict[sceneID]['updategeom'] = True
+                                    else: 
+                                        scenedict[sceneID]['updategeom'] = False
+                                    scenedict[sceneID]['coords'] = item['spatialFootprint']['coordinates'][0]
+                                    scenedict[sceneID]['modifiedDate'] = item['modifiedDate']
+                    except Exception as e:
+                        print('ERROR: {e}')
+                        ieo.logerror(QueryURL, e)
     
-                        if not 'Spacecraft Identifier' in scenedict[sceneID].keys():
-                            scenedict[sceneID]['Spacecraft Identifier'] = 'LANDSAT_{}'.format(sceneID[2:3])
+                        # if not 'Spacecraft Identifier' in scenedict[sceneID].keys():
+                        #     scenedict[sceneID]['Spacecraft Identifier'] = 'LANDSAT_{}'.format(sceneID[2:3])
+                        # if 'Scan Gap Interpolation' in scenedict[sceneID].keys():
+                        #     if isinstance(scenedict[sceneID]['Scan Gap Interpolation'], float):
+                        #         scenedict[sceneID]['Scan Gap Interpolation'] = int(scenedict[sceneID]['Scan Gap Interpolation'])
             datetuple = edatetuple + datetime.timedelta(days = 1)
     return scenedict
 
@@ -464,33 +482,37 @@ def dlxmls(startdate, enddate, xmls, ingestdir, *args, **kwargs): # This downloa
 
 ## Other functions
 
-def dlthumb(url, jpgdir, *args, **kwargs): # This downloads thumbnails from the USGS
+def dlthumb(dlurl, jpg, *args, **kwargs): # This downloads thumbnails from the USGS
     global errorsfound
-    basename = os.path.basename(url)
-    f = os.path.join(jpgdir, basename)
-    tries = 1
-    downloaded = False
-    print('Downloading {} to {}'.format(basename, jpgdir))
-    while not downloaded and tries < 6:
-        print('Download attempt {} of 5.'.format(tries))
-        try:
-            url = urlopen(dlurl)
-            urlretrieve(dlurl, filename = f)
-            if url.length == os.stat(f).st_size:
-                downloaded = True
-            else:
-                print('Error downloading, retrying.')
-                tries += 1
-        except urllib.error.URLError as e:
-            print(e.reason)
-            ieo.logerror(dlurl, e.reason, errorfile = errorfile)
-            errorsfound = True
-    if tries == 6:
-        ieo.logerror(f, 'Download error.', errorfile = errorfile)
-        print('Download failure: {}'.format(basename))
-        errorsfound = True
-    else:
-        return 'Success!'
+    jpgdir, basename = os.path.split(jpg)
+    # f = os.path.join(jpgdir, basename)
+    r = requests.get(dlurl, allow_redirects=True)
+    open(jpg, 'wb').write(r.content)
+    # tries = 1
+    # downloaded = False
+    # print('Downloading {} to {}'.format(basename, jpgdir))
+    # while not downloaded and tries < 6:
+    #     print('Download attempt {} of 5.'.format(tries))
+    #     try:
+            
+    #         # url = urlopen(dlurl)
+    #         # urlretrieve(dlurl, filename = f)
+    #         # if url.length == os.stat(f).st_size:
+    #         #     downloaded = True
+    #         # else:
+    #         #     print('Error downloading, retrying.')
+    #         #     tries += 1
+    #     # except urllib.error.URLError as e:
+    #     except Exception as e:
+    #         print(e) # e.reason
+    #         ieo.logerror(dlurl, e, errorfile = errorfile) # e.reason
+    #         errorsfound = True
+    # if tries == 6:
+    #     ieo.logerror(f, 'Download error.', errorfile = errorfile)
+    #     print('Download failure: {}'.format(basename))
+    #     errorsfound = True
+    # else:
+    return 'Success!'
 
 def makeworldfile(jpg, geom): # This attempts to make a worldfile for thumbnails so they can be displayed in a GIS
     img = Image.open(jpg)
@@ -649,7 +671,7 @@ fieldvaluelist = [
     ['GCBand6L', 'gainChangeBand6L', 'Gain Change Band 6L', ogr.OFTString, 0],
     ['GCBand7', 'gainChangeBand7', 'Gain Change Band 7', ogr.OFTString, 0],
     ['GCBand8', 'gainChangeBand8', 'Gain Change Band 8', ogr.OFTString, 0],
-    ['SCAN_GAP_I', 'SCAN_GAP_INTERPOLATION', 'Scan Gap Interpolation', ogr.OFTInteger, 0],
+    ['SCAN_GAP_I', 'SCAN_GAP_INTERPOLATION', 'Scan Gap Interpolation', ogr.OFTReal, 0],
     ['ROLL_ANGLE', 'ROLL_ANGLE', 'Roll Angle', ogr.OFTReal, 0],
     ['FULL_PART', 'FULL_PARTIAL_SCENE', 'Full Partial Scene', ogr.OFTString, 0],
     ['NADIR_OFFN', 'NADIR_OFFNADIR', 'Nadir/Off Nadir', ogr.OFTString, 0],
@@ -836,18 +858,18 @@ apiKey = getapiKey()
 
 scenedict = scenesearch(apiKey, scenelist, updatemissing, badgeom, lastmodifiedDate)
 sceneIDs = scenedict.keys()
-print('Total scenes to be added or updated to shapefile: {}'.format(len(sceneIDs)))
+print('Total scenes to be added or updated to geopackage layer: {}'.format(len(sceneIDs)))
 
 if len(sceneIDs) > 0:
     for sceneID in sceneIDs:
         print('Processing {}, scene number {} of {}.'.format(sceneID, filenum, len(sceneIDs)))
         if not (scenedict[sceneID]['updategeom'] or scenedict[sceneID]['updatemodifiedDate']) and ('coords' in scenedict[sceneID].keys()):
             scenedict = findlocalfiles(sceneID, fielddict, scenedict)
-            if scenedict[sceneID]['browseUrl'].endswith('.jpg'):
-                dlurl = scenedict[sceneID]['browseUrl']
-                thumbnails.append(scenedict[sceneID]['browseUrl'])
+            # if scenedict[sceneID]['browseUrl'].endswith('.jpg'):
+            dlurl = scenedict[sceneID]['browseUrl']
+                # thumbnails.append(scenedict[sceneID]['browseUrl'])
     
-            print('\nAdding {} to shapefile.'.format(sceneID))
+            print('\nAdding {} to geopackage layer.'.format(sceneID))
             scenelist.append(sceneID)
             # create the feature
             feature = ogr.Feature(layer.GetLayerDefn())
@@ -873,12 +895,13 @@ if len(sceneIDs) > 0:
                         ieo.logerror(key, e, errorfile = errorfile)
             
             coords = scenedict[sceneID]['coords']
+            print(coords)
             # Create ring
             ring = ogr.Geometry(ogr.wkbLinearRing)
             for coord in coords:
-                ring.AddPoint(coord[0], coord[1])
+                ring.AddPoint(coord[1], coord[0])
             if not coord[0] == coords[0][0] and coord[1] == coords[0][1]:
-                ring.AddPoint(coord[0][0], coord[0][1])
+                ring.AddPoint(coords[0][1], coords[0][0])
             # Create polygon
             
             poly = ogr.Geometry(ogr.wkbPolygon)
@@ -886,11 +909,12 @@ if len(sceneIDs) > 0:
             poly.AddGeometry(ring)
             poly.Transform(transform)   # Convert to local projection
             feature.SetGeometry(poly)
-            basename = os.path.basename(dlurl)
+            basename = '{}.jpg'.format(scenedict[sceneID]['Landsat Product Identifier'])
+            # print(dlurl)#os.path.basename(dlurl)
             jpg = os.path.join(jpgdir, basename)
             if not os.access(jpg, os.F_OK) and args.thumbnails:
                 try:
-                    response = dlthumb(dlurl, jpgdir)
+                    response = dlthumb(dlurl, jpg)
                     if response == 'Success!':
                         geom = feature.GetGeometryRef()
                         print('Creating world file.')
